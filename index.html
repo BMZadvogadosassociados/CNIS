@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>CJ BMZ</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="titulo">
+    <h1>Sistema de Cálculo Jurídico BMZ</h1>
+  </div>
+  <div class="container">
+    <div class="item">
+      <form id="formulario">
+        <input type="file" name="arquivo" accept="application/pdf" required />
+        <br><br>
+        <h3>Informe a DIB</h3>
+        <label for="dibInput">Data de Início do Benefício:</label>
+        <input type="date" id="dibInput" name="dib" required />
+        <br><br>
+        <button onclick="gerarTextoPeticao(event)">Gerar resultado</button>
+        <button onclick="verificarCNIS(event)">Ver dados do CNIS</button>
+        <button onclick="gerarPDFValorCausa(event)">Gerar PDF (via Make)</button>
+        <button onclick="listarPDFs(event)">Ver PDFs Gerados</button>
+      </form>
+      <div id="resultadoTexto" style="margin-top: 2rem;"></div>
+    </div>
+  </div>
+  <footer><p>©Sistema de Cálculo Jurídico da BMZ Advogados Associados</p></footer>
+
+  <script>
+    async function verificarCNIS(event) {
+      event.preventDefault();
+      const arquivo = document.querySelector('input[name="arquivo"]').files[0];
+      if (!arquivo) {
+        alert("Selecione um arquivo PDF primeiro.");
+        return;
+      }
+      const formData = new FormData();
+      formData.append("arquivo", arquivo);
+      try {
+        const resposta = await fetch("/api/verificar-dados-cnis", {
+          method: "POST",
+          body: formData
+        });
+        const json = await resposta.json();
+        if (json.erro) {
+          alert("Erro ao extrair dados do CNIS.");
+        } else {
+          document.getElementById("resultadoTexto").innerHTML =
+            "<pre>" + JSON.stringify(json.dadosExtraidos, null, 2) + "</pre>";
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Erro ao tentar extrair dados do CNIS.");
+      }
+    }
+
+    async function gerarPDFValorCausa(event) {
+      event.preventDefault();
+      const arquivo = document.querySelector('input[name="arquivo"]').files[0];
+      const dib = document.getElementById("dibInput").value;
+
+      if (!arquivo || !dib) {
+        alert("Por favor, selecione o PDF e informe a DIB.");
+        return;
+      }
+
+      const formData = new FormData();
+      formData.append("arquivo", arquivo);
+      formData.append("dib", dib);
+
+      try {
+        const resCalculo = await fetch("/api/calculo-make", {
+          method: "POST",
+          body: formData
+        });
+        const dados = await resCalculo.json();
+
+        if (!dados.sucesso) {
+          alert("Erro ao calcular valores.");
+          return;
+        }
+
+        const resVerif = await fetch("/api/verificar-dados-cnis", {
+          method: "POST",
+          body: formData
+        });
+        const verificado = await resVerif.json();
+        const nome = verificado.dadosExtraidos.nome || "Nome Não Encontrado";
+        const nascimento = verificado.dadosExtraidos.nascimento || "01/01/1970";
+        const sexo = verificado.dadosExtraidos.sexo || "Masculino";
+        const idadeExtenso = verificado.dadosExtraidos.idadeExtenso || "idade desconhecida";
+
+        const payload = {
+          nome,
+          nascimento,
+          sexo,
+          idadeExtenso,
+          dib: dados.dib,
+          rmi: dados.rmi,
+          vencidas: dados.vencidas,
+          vincendas: dados.vincendas,
+          total: dados.total,
+          dataGeracao: new Date().toLocaleDateString("pt-BR"),
+          dataCalculo: new Date().toLocaleDateString("pt-BR"),
+          preOuPos: "Pré-Reforma",
+          horario: new Date().toLocaleTimeString("pt-BR")
+        };
+
+        const resMake = await fetch("/api/gerar-pdf-valor-causa", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload)
+        });
+
+        if (resMake.ok) {
+          alert("✅ PDF está sendo gerado via Make. Verifique na lista em alguns segundos.");
+        } else {
+          alert("❌ Falha ao enviar para o Make.");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("❌ Erro inesperado ao gerar PDF.");
+      }
+    }
+
+    async function gerarTextoPeticao(event) {
+      event.preventDefault();
+      const dib = document.getElementById("dibInput").value;
+      const arquivo = document.querySelector('input[name="arquivo"]').files[0];
+      if (!dib || !arquivo) {
+        alert("Por favor, selecione o PDF e informe a DIB.");
+        return;
+      }
+      const formData = new FormData();
+      formData.append("arquivo", arquivo);
+      formData.append("DIB", dib);
+      try {
+        const resposta = await fetch("/api/valor-da-causa", {
+          method: "POST",
+          body: formData
+        });
+        const resultado = await resposta.json();
+        if (resultado.erro) {
+          alert("Erro: " + resultado.erro);
+        } else {
+          const html = '<h3>Resultado:</h3>' +
+                       '<textarea rows="6" style="width:100%; padding:1rem; font-size:1rem;">' +
+                       resultado.texto + '</textarea>';
+          document.getElementById("resultadoTexto").innerHTML = html;
+        }
+      } catch (err) {
+        console.error(err);
+        alert("❌ Erro ao gerar resultado.");
+      }
+    }
+
+    async function listarPDFs(event) {
+      event.preventDefault();
+      try {
+        const res = await fetch("/api/listar-pdfs");
+        const lista = await res.json();
+        if (!lista.length) {
+          alert("Nenhum PDF recebido ainda.");
+          return;
+        }
+        const links = lista.map(nome => `<li><a href="/uploads/${nome}" target="_blank">${nome}</a></li>`).join("");
+        document.getElementById("resultadoTexto").innerHTML = `<ul>${links}</ul>`;
+      } catch (err) {
+        console.error(err);
+        alert("Erro ao listar PDFs.");
+      }
+    }
+  </script>
+</body>
+</html>
